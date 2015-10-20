@@ -373,9 +373,11 @@ class UIBlockBackstore(UIBackstore):
     '''
     def __init__(self, parent):
         self.so_cls = UIBlockStorageObject
+	#self.so = None
         UIBackstore.__init__(self, 'block', parent)
 
-    def ui_command_create(self, name, dev, readonly=None):
+    # edit by Changjun Fan	
+    def ui_command_create(self, name, dev, wwn, readonly=None):
         '''
         Creates an Block Storage object. I{dev} is the path to the TYPE_DISK
         block device to use.
@@ -383,13 +385,104 @@ class UIBlockBackstore(UIBackstore):
         self.assert_root()
 
         readonly = self.ui_eval_param(readonly, 'bool', False)
-
-        so = BlockStorageObject(name, dev, readonly=readonly)
+	
+	# edit by Changjun Fan
+        so = BlockStorageObject(name, dev, wwn, readonly=readonly)
+	#self.so = so 
         ui_so = UIBlockStorageObject(so, self)
         self.setup_model_alias(so)
         self.shell.log.info("Created block storage object %s using %s."
                             % (name, dev))
         return self.new_node(ui_so)
+
+    # test by Changjun Fan
+	
+    def ui_command_test(self, greeting, myname):
+	self.shell.log.info(" %s, %s! " % (greeting, myname))
+
+    def _get_path(self, hba, dev):
+	return "/sys/kernel/config/target/core/" + hba + "/" + dev
+	
+    def _check_dev_exists(self, dev_path):
+        if not os.path.isdir(dev_path):
+	    self.shell.log.info(" %s, not exist! " % (dev_path))
+	    return 1
+       
+    def _tcm_write(self, filename, value, newline=True):
+        try:
+            with open(filename, "w") as f:
+                f.write(value)
+                if newline:
+                    f.write("\n")
+        except IOError, (errno, strerror):
+	    self.shell.log.info("The write operation does not succeed!")
+            if errno == 2:
+                self.shell.log.info("%s %s\n%s" % (filename, strerror, "Is kernel module loaded?") )
+		return 1
+
+    def ui_command_setaluatype(self, hba, dev, access_type="both", gp_name="default_tg_pt_gp"):
+	path = self._get_path(hba,dev)
+	if(self._check_dev_exists(path)==1):
+	    self.shell.log.info("There is no such hba or dev, re-input again")
+	    return 1
+
+	new_alua_type_str = str(access_type).lower()
+
+	if new_alua_type_str == "both":
+            #new_alua_type_str = "Implict and Explict"
+	    alua_type = 3
+	elif new_alua_type_str == "explict":
+	    #new_alua_type_str = "Explict"
+	    alua_type = 2
+	elif new_alua_type_str == "implict":
+	    #new_alua_type_str = "Implict"
+	    alua_type = 1
+	elif new_alua_type_str == "none":
+	    alua_type = 0
+	else:
+	    self.shell.log.info("Wrong alua access type, re-input again")
+	    return 1
+
+	alua_path = path + "/alua/" + gp_name + "/alua_access_type"
+	self._tcm_write(alua_path, str(alua_type))
+
+	#self.shell.log.info("alua path : %s\n" % (alua_path))
+	#self.shell.log.info("alua type : %s\n" % (new_alua_type_str))
+
+    def ui_command_setaluastate(self, hba, dev, access_state="o" , gp_name="default_tg_pt_gp"):
+	path = self._get_path(hba,dev)
+        if(self._check_dev_exists(path)==1):
+            self.shell.log.info("There is no such hba or dev, re-input again")
+            return 1
+
+        new_alua_state_str = str(access_state).lower()
+
+        if new_alua_state_str == "o":
+            alua_state = 0 # Active/Optimized
+        elif new_alua_state_str == "a":
+            alua_state = 1 # Active/NonOptimized
+        elif new_alua_state_str == "s":
+            alua_state = 2 # Standby
+        elif new_alua_state_str == "u":
+            alua_state = 3 # Unavailable
+        else:
+            self.shell.log.info("Wrong alua access state, re-input again")
+            return 1
+
+        alua_path = path + "/alua/" + gp_name + "/alua_access_state"
+        self._tcm_write(alua_path, str(alua_state))
+
+    def ui_command_setaluapreferred(self, hba, dev, gp_name="default_tg_pt_gp"):
+        path = self._get_path(hba,dev)
+        if(self._check_dev_exists(path)==1):
+            self.shell.log.info("There is no such hba or dev, re-input again")
+            return 1
+	if not os.path.isdir(path + "/alua/" + gp_name):
+            self.shell.log.info("Unable to locate TG Pt Group: " + gp_name)
+	    return 1
+        alua_path = path + "/alua/" + gp_name + "/preferred"
+        self._tcm_write(alua_path, "1")
+	
 
     def ui_complete_create(self, parameters, text, current_param):
         '''
